@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+trap cleanup SIGINT SIGTERM ERR EXIT
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
+
+usage() {
+  cat << EOF
+Usage: $(basename "${BASH_SOURCE[0]}") <contest_name> <problems> [template_file]
+
+Arguments:
+  <contest_name>              Name of the contest (case-sensitive, e.g., Abc123)
+  <problems>                  Either the number of problems (e.g., 5) or the last problem letter
+                              (case-insensitive, e.g., h or H → problems a.cpp to h.cpp)
+  [template_file]             Path to a custom template file (optional)
+                              Defaults to: ./template.cpp
+
+Examples:
+  $(basename "${BASH_SOURCE[0]}") Abc123 h
+  $(basename "${BASH_SOURCE[0]}") Abc123 H
+  $(basename "${BASH_SOURCE[0]}") xyz456 5
+  $(basename "${BASH_SOURCE[0]}") xyz456 5 ~/custom_template.cpp
+EOF
+  exit
+}
+
+cleanup() {
+  status=$?
+  trap - SIGINT SIGTERM ERR EXIT
+
+  if [[ -n "${contest_path-}" && -d "$contest_path" ]]; then
+    if [[ $status -ne 0 ]]; then
+      msg "${ORANGE}(Git) cleaning up: $contest_path${NOFORMAT}"
+      git clean -qfd -- "$contest_path"
+    fi
+  fi
+}
+
+setup_colors() {
+  if [[ -t 2 ]] && [[ -z "${NO_COLOR-}" ]] && [[ "${TERM-}" != "dumb" ]]; then
+    NOFORMAT='\033[0m' RED='\033[0;31m' GREEN='\033[0;32m' ORANGE='\033[0;33m' BLUE='\033[0;34m' PURPLE='\033[0;35m' CYAN='\033[0;36m' YELLOW='\033[1;33m'
+  else
+    NOFORMAT='' RED='' GREEN='' ORANGE='' BLUE='' PURPLE='' CYAN='' YELLOW=''
+  fi
+}
+
+msg() {
+  echo >&2 -e "${1-}"
+}
+
+die() {
+  local msg=$1
+  local code=${2-1}
+  msg "$msg"
+  exit "$code"
+}
+
+parse_params() {
+  if [[ $# -lt 2 || $# -gt 3 ]]; then
+    usage
+  fi
+
+  contest_name="$1"
+  problems="$2"
+
+  if [[ $problems =~ ^[0-9]+$ ]]; then
+    count=$problems
+  elif [[ $problems =~ ^[A-Za-z]+$ ]]; then
+    count=$(letters_to_num "$(echo "$problems" | tr '[:lower:]' '[:upper:]')")
+  else
+    die "${RED}Second argument must be a number or letters (a–z, aa, ab, ...).${NOFORMAT}"
+  fi
+
+  if [[ $# -eq 3 ]]; then
+    template_file="$3"
+  else
+    template_file="$PWD/template.cpp"
+  fi
+}
+
+letters_to_num() {
+  local s="$1"
+  local len=${#s}
+  local num=0
+  for ((i=0; i<len; i++)); do
+    c=$(printf "%d" "'${s:i:1}")
+    c=$((c - 64)) # 'A' → 1
+    num=$((num * 26 + c))
+  done
+  echo "$num"
+}
+
+num_to_letters() {
+  local n=$1
+  local result=""
+  while (( n >= 0 )); do
+    local r=$(( n % 26 ))
+    result="$(printf \\$(printf '%03o' $((65 + r))))$result"
+    n=$(( n / 26 - 1 ))
+  done
+  echo "$result"
+}
+
+create_contest() {
+  project_root="$PWD"
+  contest_path="$project_root/$contest_name"
+
+  mkdir -p "$contest_path"
+
+  if [[ ! -f "$template_file" ]]; then
+    die "${RED}Template file not found: $template_file${NOFORMAT}"
+  fi
+
+  gitignore_file="$contest_path/.gitignore"
+  if [[ ! -f "$gitignore_file" ]]; then
+    cat > "$gitignore_file" << EOF
+*_input.txt
+*_output.txt
+EOF
+    msg "${GREEN}Created $gitignore_file${NOFORMAT}"
+  else
+    msg "${ORANGE}Skipped $gitignore_file (already exists)${NOFORMAT}"
+  fi
+
+  for ((i=0; i<count; i++)); do
+    letter=$(num_to_letters $i | tr '[:upper:]' '[:lower:]')   # lowercase
+    file="$contest_path/$letter.cpp"
+    if [[ -f "$file" ]]; then
+      msg "${ORANGE}Skipped $file (already exists)${NOFORMAT}"
+    else
+      sed -e "s/{{PROBLEM}}/$letter/g" \
+          -e "s/{{CONTEST}}/$contest_name/g" \
+          "$template_file" > "$file"
+      msg "${GREEN}Created $file${NOFORMAT}"
+    fi
+  done
+}
+
+setup_colors
+parse_params "$@"
+
+create_contest
+msg "${CYAN}To enter the contest folder, run:\ncd \"$contest_name\"${NOFORMAT}"

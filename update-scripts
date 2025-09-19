@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+trap cleanup SIGINT SIGTERM ERR EXIT
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
+
+repo_dir="$HOME/.local/share/cp-scripts"
+bin_dir="$HOME/.local/bin"
+official_remote="https://github.com/ICPC-Amrita/cp-scripts.git"
+
+usage() {
+  cat << EOF
+Usage: $(basename "${BASH_SOURCE[0]}")
+
+Updates cp-scripts by fetching and resetting to origin/main.
+EOF
+  exit
+}
+
+cleanup() {
+  status=$?
+  trap - SIGINT SIGTERM ERR EXIT
+}
+
+setup_colors() {
+  if [[ -t 2 ]] && [[ -z "${NO_COLOR-}" ]] && [[ "${TERM-}" != "dumb" ]]; then
+    NOFORMAT='\033[0m' RED='\033[0;31m' GREEN='\033[0;32m' ORANGE='\033[0;33m' CYAN='\033[0;36m'
+  else
+    NOFORMAT='' RED='' GREEN='' ORANGE='' CYAN=''
+  fi
+}
+
+msg() {
+  echo >&2 -e "${1-}"
+}
+
+die() {
+  local msg=$1
+  local code=${2-1}
+  msg "$msg"
+  exit "$code"
+}
+
+check_update() {
+  cd "$repo_dir" || return 1
+
+  # Ensure remote is official
+  current_remote=$(git remote get-url origin 2>/dev/null || echo "")
+  if [[ "$current_remote" != "$official_remote" ]]; then
+    msg "${ORANGE}Remote is not official, fixing...${NOFORMAT}"
+    git remote remove origin || true
+    git remote add origin "$official_remote"
+  fi
+
+  # Current commit info
+  current_commit=$(git rev-parse HEAD)
+  commit_short=$(git rev-parse --short HEAD)
+  commit_date=$(git show -s --format=%ci "$current_commit" 2>/dev/null || echo "unknown")
+
+  msg "${CYAN}Current version: $commit_short ($commit_date)${NOFORMAT}"
+
+  # Fetch & compare
+  msg "${ORANGE}Checking for updates...${NOFORMAT}"
+  git fetch origin --prune
+  remote_commit=$(git rev-parse origin/main)
+
+  if [[ "$current_commit" == "$remote_commit" ]]; then
+    msg "${GREEN}cp-scripts is already up to date.${NOFORMAT}"
+    return 0
+  else
+    msg "${ORANGE}Update available.${NOFORMAT}"
+    return 1
+  fi
+}
+
+update_repo() {
+  mkdir -p "$repo_dir" "$bin_dir"
+
+  # If repo missing → clone
+  if [[ ! -d "$repo_dir/.git" ]]; then
+    if [[ -d "$repo_dir" ]]; then
+      msg "${ORANGE}$repo_dir exists but is not a git repo, replacing...${NOFORMAT}"
+      rm -rf "$repo_dir"
+    else
+      msg "${ORANGE}$repo_dir does not exist, cloning...${NOFORMAT}"
+    fi
+    git clone "$official_remote" "$repo_dir" || die "${RED}Clone failed${NOFORMAT}"
+    msg "${GREEN}cp-scripts cloned successfully.${NOFORMAT}"
+  fi
+
+  # Check if update needed
+  if ! check_update; then
+    msg "${ORANGE}Updating to latest commit...${NOFORMAT}"
+    git -C "$repo_dir" reset --hard origin/main || die "${RED}Reset failed${NOFORMAT}"
+
+    new_commit=$(git -C "$repo_dir" rev-parse HEAD)
+    new_short=$(git -C "$repo_dir" rev-parse --short HEAD)
+    new_date=$(git -C "$repo_dir" show -s --format=%ci "$new_commit")
+
+    msg "${GREEN}Updated to version: $new_short ($new_date)${NOFORMAT}"
+  fi
+
+  # Symlink executables into ~/.local/bin
+  msg "${ORANGE}Linking scripts into $bin_dir...${NOFORMAT}"
+  for f in "$repo_dir"/*; do
+    if [[ -f "$f" && -x "$f" ]]; then
+      ln -sf "$f" "$bin_dir/$(basename "$f")"
+    fi
+  done
+
+  msg "${GREEN}All executables from cp-scripts are now available in your PATH.${NOFORMAT}"
+}
+
+# ---- main ----
+setup_colors
+
+update_repo
