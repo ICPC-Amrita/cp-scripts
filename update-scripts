@@ -3,8 +3,6 @@
 set -Eeuo pipefail
 trap cleanup SIGINT SIGTERM ERR EXIT
 
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
-
 repo_dir="$HOME/.local/share/cp-scripts"
 bin_dir="$HOME/.local/bin"
 official_remote="https://github.com/ICPC-Amrita/cp-scripts.git"
@@ -51,6 +49,7 @@ check_update() {
     msg "${ORANGE}Remote is not official, fixing...${NOFORMAT}"
     git remote remove origin || true
     git remote add origin "$official_remote"
+    msg "${GREEN}Remote set to official: $official_remote${NOFORMAT}"
   fi
 
   # Current commit info
@@ -69,7 +68,7 @@ check_update() {
     msg "${GREEN}cp-scripts is already up to date.${NOFORMAT}"
     return 0
   else
-    msg "${ORANGE}Update available.${NOFORMAT}"
+    msg "${GREEN}Update available.${NOFORMAT}"
     return 1
   fi
 }
@@ -109,7 +108,7 @@ update_repo() {
     fi
   done
 
-  msg "${GREEN}All executables from cp-scripts are now available in your PATH.${NOFORMAT}"
+  msg "${GREEN}Symlinks in place.${NOFORMAT}"
 }
 
 # ---- main ----
