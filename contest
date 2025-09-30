@@ -14,7 +14,8 @@ Arguments:
   <problems>                  Either the number of problems (e.g., 5) or the last problem letter
                               (case-insensitive, e.g., h or H → problems a.cpp to h.cpp)
   [template_file]             Path to a custom template file (optional)
-                              Defaults to: ./template.cpp
+                              If omitted, searches for template.* (e.g. template.cpp, template.py)
+                              If multiple found, you’ll be prompted to specify one.
 
 Examples:
   $(basename "${BASH_SOURCE[0]}") Abc123 h
@@ -32,7 +33,7 @@ cleanup() {
   if [[ -n "${contest_path-}" && -d "$contest_path" ]]; then
     if [[ $status -ne 0 ]]; then
       msg "${ORANGE}(Git) cleaning up: $contest_path${NOFORMAT}"
-      git clean -qfd -- "$contest_path"
+      git clean -qfd -- "$contest_path" || true
     fi
   fi
 }
@@ -74,8 +75,27 @@ parse_params() {
 
   if [[ $# -eq 3 ]]; then
     template_file="$3"
+    if [[ ! -f "$template_file" ]]; then
+      die "${RED}Template file not found: $template_file${NOFORMAT}"
+    fi
   else
-    template_file="$PWD/template.cpp"
+    auto_detect_template
+  fi
+}
+
+auto_detect_template() {
+  local candidates=()
+  while IFS= read -r -d '' file; do
+    candidates+=("$file")
+  done < <(find "$PWD" -maxdepth 1 -type f \( -name "template" -o -name "template.*" \) -print0 2>/dev/null)
+
+  if (( ${#candidates[@]} == 0 )); then
+    die "${RED}No template file found in this directory. Add one or specify it as the third argument.${NOFORMAT}"
+  elif (( ${#candidates[@]} > 1 )); then
+    die "${RED}Multiple template files found in this directory. Specify one as the third argument.${NOFORMAT}"
+  else
+    template_file="${candidates[0]}"
+    msg "${ORANGE}Using template file: $template_file${NOFORMAT}"
   fi
 }
 
@@ -108,8 +128,13 @@ create_contest() {
 
   mkdir -p "$contest_path"
 
-  if [[ ! -f "$template_file" ]]; then
-    die "${RED}Template file not found: $template_file${NOFORMAT}"
+  # Determine template extension
+  template_ext="${template_file##*.}"
+  if [[ "$template_file" == *.* ]]; then
+    ext=".$template_ext"
+  else
+    ext=".cpp"B.Tech graduate with interests in software engineering, research, open-source, and cybersecurity. Passionate about leveraging technology to solve real-world problems.
+    msg "${ORANGE}Template file has no extension; defaulting to .cpp${NOFORMAT}"
   fi
 
   gitignore_file="$contest_path/.gitignore"
@@ -125,7 +150,7 @@ EOF
 
   for ((i=0; i<count; i++)); do
     letter=$(num_to_letters $i | tr '[:upper:]' '[:lower:]')   # lowercase
-    file="$contest_path/$letter.cpp"
+    file="$contest_path/$letter$ext"
     if [[ -f "$file" ]]; then
       msg "${ORANGE}Skipped $file (already exists)${NOFORMAT}"
     else
